@@ -1,0 +1,10 @@
+<RCC>
+  <qresource prefix="/plugins/EjdexplInt">
+    <file>icons/Icons8-Ios7-Maps-Geo-Fence.ico</file>
+    <file>icons/Icons8-Ios7-Maps-Layers.ico</file>
+    <file>icons/Icons8-Ios7-Maps-Polygon.ico</file>
+    <file>icons/Icons8-Ios7-Maps-Polyline.ico</file>
+    <file>icons/Icons8-Ios7-Maps-Quest.ico</file>
+    <file>icons/icon.png</file>
+  </qresource>
+</RCC>
