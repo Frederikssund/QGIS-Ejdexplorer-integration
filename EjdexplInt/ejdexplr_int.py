@@ -27,6 +27,7 @@ from PyQt4.QtGui import QAction, QIcon, QToolButton, QMenu, QActionGroup, QAppli
 import resources
 #from ejdexplr_int_dialog import EjdexplIntDialog
 from mapTools import *
+from canvas_items import CanvasItems
 from subprocess import Popen
 import os.path
 import urllib
@@ -41,6 +42,7 @@ class EjdexplInt:
         self.searchobj = None
         self.readconfig()
         self.updateconfig()
+        self.srsitem = CanvasItems(self.iface.mapCanvas(),self.config['search_color'],self.config['search_style'],self.config['search_width'],self.config['search_icon'],self.config['search_size'])
         self.db = QSqlDatabase.addDatabase('QODBC')
         self.db.setDatabaseName(self.config['connection'])
         
@@ -66,13 +68,17 @@ class EjdexplInt:
         self.tbmenu = QMenu()
 
         self.ag1 = QActionGroup(self.tbmenu,exclusive=True)
-        self.acPol  = self.ag1.addAction(QAction(QIcon(':/plugins/ImpactAnalysis/icons/Icons8-Ios7-Maps-Polygon.ico'),self.tr(u'Draw polygon'),self.tbmenu,checkable=True))
-        self.acLin  = self.ag1.addAction(QAction(QIcon(':/plugins/ImpactAnalysis/icons/Icons8-Ios7-Maps-Polyline.ico'),self.tr(u'Draw line'),self.tbmenu,checkable=True))
-        self.acPnt  = self.ag1.addAction(QAction(QIcon(':/plugins/ImpactAnalysis/icons/Icons8-Ios7-Maps-Geo-Fence.ico'),self.tr(u'Draw point'),self.tbmenu,checkable=True))
-        self.acAlay = self.ag1.addAction(QAction(QIcon(':/plugins/ImpactAnalysis/icons/Icons8-Ios7-Maps-Layers.ico'),self.tr(u'Active selection'),self.tbmenu,checkable=True))
-        self.acPobj = self.ag1.addAction(QAction(QIcon(':/plugins/ImpactAnalysis/icons/Icons8-Ios7-Maps-Quest.ico'),self.tr(u'Previous object'),self.tbmenu,checkable=True))
+        self.acPol  = self.ag1.addAction(QAction(QIcon(':/plugins/EjdexplInt/icons/Icons8-Ios7-Maps-Polygon.ico'),self.tr(u'Draw polygon'),self.tbmenu,checkable=True))
+        self.acLin  = self.ag1.addAction(QAction(QIcon(':/plugins/EjdexplInt/icons/Icons8-Ios7-Maps-Polyline.ico'),self.tr(u'Draw line'),self.tbmenu,checkable=True))
+        self.acPnt  = self.ag1.addAction(QAction(QIcon(':/plugins/EjdexplInt/icons/Icons8-Ios7-Maps-Geo-Fence.ico'),self.tr(u'Draw point'),self.tbmenu,checkable=True))
+        self.acAlay = self.ag1.addAction(QAction(QIcon(':/plugins/EjdexplInt/icons/Icons8-Ios7-Maps-Layers.ico'),self.tr(u'Active selection'),self.tbmenu,checkable=True))
+        self.acPobj = self.ag1.addAction(QAction(QIcon(':/plugins/EjdexplInt/icons/Icons8-Ios7-Maps-Quest.ico'),self.tr(u'Previous object'),self.tbmenu,checkable=True))
         self.tbmenu.addActions(self.ag1.actions());
-        self.acPol.setChecked(True)
+        self.acPol.setChecked(self.config['searchtool']==u'polygon')
+        self.acLin.setChecked(self.config['searchtool']==u'line')
+        self.acPnt.setChecked(self.config['searchtool']==u'point')
+        self.acAlay.setChecked(self.config['searchtool']==u'selection')
+        self.acPobj.setChecked(self.config['searchtool']==u'search')
 
         self.tbmenu.addSeparator()
 
@@ -81,8 +87,15 @@ class EjdexplInt:
         self.acBulk = self.ag2.addAction(QAction(self.tr(u'Use bulk mode'),self.tbmenu,checkable=True))
         self.acMerge = self.ag2.addAction(QAction(self.tr(u'Use merge mode'),self.tbmenu,checkable=True))
         self.tbmenu.addActions(self.ag2.actions());
-        self.acSingle.setChecked(True)
+        self.acSingle.setChecked(self.config['tabchoice']==u'single')
+        self.acBulk.setChecked(self.config['tabchoice']==u'bulk')
+        self.acMerge.setChecked(self.config['tabchoice']==u'merge')
 
+        if self.config['old_behavior'] == 0:
+            self.tbmenu.addSeparator()
+            self.acClear = QAction(self.tr(u'Clear'),self.tbmenu,checkable=False)
+            self.acClear.triggered.connect(self.clearSearch)    
+            self.tbmenu.addAction(self.acClear)
 
         self.toolButton = QToolButton()
         self.toolButton.addAction(self.action)
@@ -97,7 +110,12 @@ class EjdexplInt:
     def drawChanged(self, action):
         if action.isChecked():
             self.run()
-    
+
+
+    def clearSearch(self):
+        if self.config['old_behavior'] == 0:
+            self.srsitem.clearMarkerGeom()
+        
     def unload(self):
 
         self.iface.removePluginMenu(self.tr(u'Activate EjdExplorer tool'), self.action)
@@ -110,6 +128,8 @@ class EjdexplInt:
 
         geoms =  None
         canvas = self.iface.mapCanvas()
+        if self.config['old_behavior'] == 0:
+            self.srsitem.clearMarkerGeom()
 
         if self.acPol.isChecked():   # polygon
             tool = CaptureTool(canvas, self.geometryAdded, CaptureTool.CAPTURE_POLYGON)
@@ -144,12 +164,19 @@ class EjdexplInt:
         else:
             self.iface.messageBar().pushMessage(self.tr(u'EjdExplorer - Object definition'), self.tr(u'Uknown search tool'), QgsMessageBar.CRITICAL, 6)
 
-    def cnvobj2wkt (self,gobj,epsg_in,epsg_out):
+    def cnvobj2wkt (self,gobj,epsg_in,epsg_out, buffer_pol, buffer_lin):
+        
+        # Buffer around search object; negative for polygon or positive for points and lines
+        if gobj.type() == 2: # Polygon
+            gobj = gobj.buffer(buffer_pol,8)       
+        else:                # Line or Point
+            gobj = gobj.buffer(buffer_lin,8)       
 
         crsSrc = QgsCoordinateReferenceSystem(int(epsg_in))
         crsDest = QgsCoordinateReferenceSystem(int(epsg_out))
         xform = QgsCoordinateTransform(crsSrc, crsDest)
         i = gobj.transform(xform)
+
         return gobj.exportToWkt()
 
     def geometryAdded(self, geom):
@@ -157,8 +184,10 @@ class EjdexplInt:
         self.iface.messageBar().pushMessage(self.tr(u'EjdExplorer - Start EjdExplorer'), self.tr(u'Starting EjdExplorer program, takes a few seconds..'), QgsMessageBar.INFO, 6)
 
         self.searchobj = geom
+        if self.config['old_behavior'] == 0:
+            self.srsitem.setMarkerGeom(geom)
         epsg_in = self.iface.mapCanvas().mapRenderer().destinationCrs().authid().replace('EPSG:','')
-        geom_txt = self.cnvobj2wkt (geom,epsg_in,self.config['epsg'])
+        geom_txt = self.cnvobj2wkt (geom,epsg_in,self.config['epsg'],self.config['buffer_pol'],self.config['buffer_lin'])
         txt1, txt2 = self.getlists (geom_txt)
         
         mode = u'single'
@@ -209,20 +238,41 @@ class EjdexplInt:
         k = __package__
         self.config = {
             'epsg':       unicode(s.value(k + "/epsg"       , "25832", type=str)),
+            'buffer_pol': s.value(k + "/buffer_pol" , -0.1, type=float),
+            'buffer_lin': s.value(k + "/buffer_lin" , 0.1, type=float),
+            'searchtool': unicode(s.value(k + "/searchtool" , "point", type=str)).lower(),
+            'tabchoice':  unicode(s.value(k + "/tabchoice"  , "single", type=str)).lower(),
             'sqlquery':   unicode(s.value(k + "/sqlquery"   , "select  LTRIM(RTRIM(CONVERT(varchar(10), [landsejerlavskode]))) as ejrlvnr, LTRIM(RTRIM([matrikelnummer])) as matrnr from [dbo].[Jordstykke] where geometry::STGeomFromText('{0}',{1}).STIntersects([geometri])=1", type=str)),
             'connection': unicode(s.value(k + "/connection" , "Driver={SQL Server};Server=f-sql12;Database=LOIS;Trusted_Connection=Yes;", type=str)),
             'command':    unicode(s.value(k + "/command"    , 'C:/"Program Files (x86)"/LIFA/EjdExplorer/LIFA.EjdExplorer.GUI.exe', type=str)),
-            'parameter':  unicode(s.value(k + "/parameter"  , 'ejdexpl://?mode={0}&CadastralDistrictIdentifier={1}&RealPropertyKey={2}', type=str))
+            'parameter':  unicode(s.value(k + "/parameter"  , 'ejdexpl://?mode={0}&CadastralDistrictIdentifier={1}&RealPropertyKey={2}', type=str)),
+            'search_color':  str(s.value(k + "/search_color", "#FF0000", type=str)),
+            'search_width':  s.value(k + "/search_width", 4, type=int),
+            'search_style':  s.value(k + "/search_style", 1, type=int),
+            'search_icon':   s.value(k + "/search_icon", QgsVertexMarker.ICON_CROSS, type=int),
+            'search_size':   s.value(k + "/search_size", 30, type=int),
+            'old_behavior':   s.value(k + "/old_behavior", 0, type=int)
         }
+        self.srsitem = CanvasItems(self.iface.mapCanvas(),self.config['search_color'],self.config['search_style'],self.config['search_width'],self.config['search_icon'],self.config['search_size'])
 
     def updateconfig(self):
 
         s = QSettings()
         k = __package__
         s.setValue(k + "/epsg",          self.config['epsg'])
+        s.setValue(k + "/buffer_pol",    self.config['buffer_pol'])
+        s.setValue(k + "/buffer_lin",    self.config['buffer_lin'])
+        s.setValue(k + "/searchtool",    self.config['searchtool'])
+        s.setValue(k + "/tabchoice",     self.config['tabchoice'])
         s.setValue(k + "/sqlquery",      self.config['sqlquery'])
         s.setValue(k + "/connection",    self.config['connection'])
         s.setValue(k + "/command",       self.config['command'])
         s.setValue(k + "/parameter",     self.config['parameter'])
+        s.setValue(k + "/search_color",  self.config['search_color'])
+        s.setValue(k + "/search_style",  self.config['search_style'])
+        s.setValue(k + "/search_width",  self.config['search_width'])
+        s.setValue(k + "/search_icon",  self.config['search_icon'])
+        s.setValue(k + "/search_size",  self.config['search_size'])
+        s.setValue(k + "/old_behavior", self.config['old_behavior'])
         s.sync
 

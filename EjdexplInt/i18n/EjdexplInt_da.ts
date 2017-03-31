@@ -87,5 +87,10 @@
         <source>EjdExplorer - Database Error</source>
         <translation type="unfinished">EjdExplorer - Database fejl</translation>
     </message>
+    <message>
+        <location filename="ejdexplr_int.py" line="95"/>
+        <source>Clear</source>
+        <translation type="unfinished">Nulstil</translation>
+    </message>
 </context>
 </TS>
